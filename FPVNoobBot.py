@@ -1,49 +1,55 @@
 # Import required libraries
-import praw  # Reddit API wrapper
-import openai  # OpenAI API for language processing
-import time  # Used to add delays (rate limiting, retries)
-import os  # For checking file existence and file paths
-from openai import OpenAIError  # Error handling for OpenAI API
+import praw
+import openai
+import time
+import os
+from openai import OpenAIError
+import smtplib
+from email.mime.text import MIMEText
 
-# Reddit API credentials 
-REDDIT_CLIENT_ID = "CLientID"
-REDDIT_CLIENT_SECRET = "CLientSecret"
-REDDIT_USERNAME = "Username"
-REDDIT_PASSWORD = "Password"
-REDDIT_USER_AGENT = "UserAgent"
+# Email credentials
+email_address = "____"
+email_password = "____"
 
-# OpenAI API Key 
-OPENAI_API_KEY = "APIKey"
+# Email recipient
+recipient = "____"
 
-# File path to keep track of posts already replied to
-SCANNED_POSTS_FILE = "RedditBots/FPVNoobBot/scanned_posts.txt"
+# Reddit API credentials
+reddit_client_id = "____"
+reddit_client_secret = "____"
+reddit_username = "____"
+reddit_password = "____"
+reddit_user_agent = "____"
 
-# Initialise Reddit and OpenAI API clients 
+# OpenAI API key
+openai_api_key = "____"
+
+# File path to track scanned posts
+scanned_posts_file = "____"
+
+# Initialise Reddit and OpenAI
 reddit = praw.Reddit(
-    client_id=REDDIT_CLIENT_ID,
-    client_secret=REDDIT_CLIENT_SECRET,
-    username=REDDIT_USERNAME,
-    password=REDDIT_PASSWORD,
-    user_agent=REDDIT_USER_AGENT
+    client_id=reddit_client_id,
+    client_secret=reddit_client_secret,
+    username=reddit_username,
+    password=reddit_password,
+    user_agent=reddit_user_agent
 )
-openai.api_key = OPENAI_API_KEY
+openai.api_key = openai_api_key
 
-# Load a list of post IDs the bot has already replied to 
 def load_scanned_posts():
-    if not os.path.exists(SCANNED_POSTS_FILE):
+    if not os.path.exists(scanned_posts_file):
         return set()
-    with open(SCANNED_POSTS_FILE, "r") as f:
+    with open(scanned_posts_file, "r") as f:
         return set(line.strip() for line in f.readlines())
 
-# Save a post ID after replying so we don’t reply again 
-def save_replied_post(post_id):
-    with open(SCANNED_POSTS_FILE, "a") as f:
+def save_scanned_post(post_id):
+    os.makedirs(os.path.dirname(scanned_posts_file), exist_ok=True)
+    with open(scanned_posts_file, "a") as f:
         f.write(post_id + "\n")
 
-# Basic filtering to reduce API usage 
 def post_filtering(title, body):
     text = f"{title} {body}".lower()
-    # Looks for common keywords that might suggest a takeoff or motor spin issue
     keywords = [
         "motor", "motors", "spin", "spinning", "throttle", "arming", "arm", "props off", "bench test",
         "prop", "props", "propeller", "ramps up", "motor idle", "motor output", "motor increase",
@@ -53,7 +59,6 @@ def post_filtering(title, body):
     ]
     return any(keyword in text for keyword in keywords)
 
-# Define chatgpt settings
 def ask_openai(prompt):
     while True:
         try:
@@ -65,10 +70,7 @@ def ask_openai(prompt):
                 ]
             )
             return response.choices[0].message.content.strip().lower()
-            
-        # API Error Handling
         except OpenAIError as e:
-            # If API rate limit is hit, wait and retry
             wait_time = 60
             if "Please try again in" in str(e):
                 try:
@@ -77,20 +79,31 @@ def ask_openai(prompt):
                     pass
             print(f"Rate limit reached. Waiting {wait_time} seconds...")
             time.sleep(wait_time)
-            
-        # Other errors
         except Exception as e:
             print(f"OpenAI API error: {e}")
             return "no"
 
-# Ask OpenAI if each post is about flip-out on takeoff
+def send_email(email_address, email_password, email_subject, email_body, recipient):
+    msg = MIMEText(email_body)
+    msg['Subject'] = email_subject
+    msg['From'] = email_address
+    msg['To'] = recipient
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(email_address, email_password)
+            smtp.send_message(msg)
+        print("Email sent successfully.")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
 def is_flip_post(title, body):
-    # Skip posts with a lack of context
     if len(title.split()) + len(body.split()) < 4:
         print("Skipping post: Not enough context")
         return False
     
-    # Prompt
     prompt = f"""A user posted this in r/fpv:
     Title: "{title}"
     Body: "{body}"
@@ -103,14 +116,11 @@ def is_flip_post(title, body):
     Always answer with only "Yes" or "No", no extra text."""
     return ask_openai(prompt) == "yes"
 
-# Ask OpenAI if the post is about motor spin when props are off
 def is_motor_spin_post(title, body):
-    # Skip posts with a lack of context
     if len(title.split()) + len(body.split()) < 4:
         print("Skipping post: Not enough context")
         return False
-        
-    # Prompt
+    
     prompt = f"""A user posted this in r/fpv:
     Title: "{title}"
     Body: "{body}"
@@ -121,62 +131,62 @@ def is_motor_spin_post(title, body):
     Answer only "Yes" or "No"."""
     return ask_openai(prompt) == "yes"
 
-# Main function: scans new posts in r/fpv
 def scan_fpv_subreddit():
     subreddit = reddit.subreddit("fpv")
     scanned_posts = load_scanned_posts()
-    
-    # Scans the 5 latest post, skipping any already scanned
+
     for submission in subreddit.new(limit=5):
         if submission.id in scanned_posts:
-            continue 
-        # Defining the title and body of the post
-        title = submission.title
-        body = submission.selftext
-        
-        #Skip posts the dont meet the filtering criteria
-        if not post_filtering(title, body):
-            print(f"Skipping irrelevant post: {title}")
             continue
 
-        # If the post is about flip-out on takeoff
-        if is_flip_post(title, body):
-            print(f"Flip issue found: {title}")
-            response = (
-                "It seems like you're experiencing a drone flip on takeoff.\n\n"
-                "[Here's](https://www.youtube.com/watch?v=7sSYwzVCJdA) a video that should help troubleshoot the issue\n\n" # JBardwell's video
-                "---\n"
-                "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically." 
-            )
-        # If the post is about motors accelerating with no props
-        elif is_motor_spin_post(title, body):
-            print(f"Motor spin post found: {title}")
-            response = (
-                "It seems like your quads motors are throttling up on their own when arming without props. This is totally normal.\n\n"
-                "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
-                "This doesn’t happen in the air or with props on, it’s just feedback loss.\n\n"
-                "---\n"
-                "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically. ^This ^feature ^is ^still ^being ^tested, ^if ^this ^reply ^seems ^wrong, ^please ^report ^it ^by ^replying ^to ^the ^bot."
-            )
-        else:
-            continue  # Skip if neither category matched
+        title = submission.title
+        body = submission.selftext
 
-        # Reply to post
+        if not post_filtering(title, body):
+            print(f"Skipping post: {title}")
+            save_scanned_post(submission.id)
+            continue
+
         try:
-            submission.reply(response)
-            print("Replied to the post!")
-            save_replied_post(submission.id) # Save the post ID to prevent repeat scanning and reduce OpenAI API costs
-        # Error handling
-        except Exception as e:
-            print(f"Error replying to post: {e}")
+            post_url = f"https://www.reddit.com{submission.permalink}"
 
-        # Pause briefly to avoid spam or rate limits
+            if is_flip_post(title, body):
+                print(f"Flip issue found: {title}")
+                response = (
+                    "It seems like you're experiencing a drone flip on takeoff.\n\n"
+                    "[Here's](https://www.youtube.com/watch?v=7sSYwzVCJdA) a video that should help troubleshoot the issue.\n\n"
+                    "---\n"
+                    "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
+                )
+                submission.reply(response)
+                email_subject = "Bot Reply - Flip Dectected"
+                email_body = f"Bot replied to a Reddit post:\n\nTitle: {title}\n\nLink: {post_url}"
+                send_email(email_address, email_password, email_subject, email_body, recipient)
+
+            elif is_motor_spin_post(title, body):
+                print(f"Motor spin post found: {title}")
+                response = (
+                    "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
+                    "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
+                    "This doesn’t happen in the air or with props on—it's just feedback loss.\n\n"
+                    "---\n"
+                    "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically. ^This ^feature ^is ^still ^being ^tested, ^if ^this ^reply ^seems ^wrong, ^please ^report ^it ^by ^replying ^to ^the ^bot."
+                )
+                submission.reply(response)
+                email_subject = "Bot Reply - Motor Spin Issue"
+                email_body = f"Bot replied to a Reddit post:\n\nTitle: {title}\n\nLink: {post_url}"
+                send_email(email_address, email_password, email_subject, email_body, recipient)
+            else:
+                print (f"Scanned Post: {title}")
+
+        except Exception as e:
+            print(f"Error replying to post or sending email: {e}")
+
+        save_scanned_post(submission.id)
         time.sleep(10)
 
-# Main loop: run the bot every 10 minutes
 if __name__ == "__main__":
     while True:
         scan_fpv_subreddit()
-        print("Sleeping for 10 minutes...")
-        time.sleep(600)
-
+        print("Sleeping for 1 minute...")
+        time.sleep(60)
