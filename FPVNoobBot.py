@@ -55,7 +55,7 @@ def post_filtering(title, body):
         "prop", "props", "propeller", "ramps up", "motor idle", "motor output", "motor increase",
         "flip", "flips", "flipping", "flipped", "flip out", "flips out", "roll", "yaw spin", 
         "jump", "tumbles", "unstable on takeoff", "disarms on takeoff", "crash", "flips on arming",
-        "disarm throttle", "flip takeoff", "won't takeoff"
+        "disarms", "uncontrollable", "flip takeoff", "won't takeoff"
     ]
     return any(keyword in text for keyword in keywords)
 
