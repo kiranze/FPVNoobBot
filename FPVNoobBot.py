@@ -6,6 +6,9 @@ import os
 from openai import OpenAIError
 import smtplib
 from email.mime.text import MIMEText
+from colorama import init, Fore
+
+init(autoreset=True)
 
 # Email credentials
 email_address = "____"
@@ -16,7 +19,7 @@ recipient = "____"
 
 # Reddit API credentials
 reddit_client_id = "____"
-reddit_client_secret = "____"
+reddit_client_secret = "____-A"
 reddit_username = "____"
 reddit_password = "____"
 reddit_user_agent = "____"
@@ -55,7 +58,7 @@ def post_filtering(title, body):
         "prop", "props", "propeller", "ramps up", "motor idle", "motor output", "motor increase",
         "flip", "flips", "flipping", "flipped", "flip out", "flips out", "roll", "yaw spin", 
         "jump", "tumbles", "unstable on takeoff", "disarms on takeoff", "crash", "flips on arming",
-        "disarms", "uncontrollable", "flip takeoff", "won't takeoff"
+        "disarm", "uncontrollable", "flip takeoff", "won't takeoff"
     ]
     return any(keyword in text for keyword in keywords)
 
@@ -77,10 +80,10 @@ def ask_openai(prompt):
                     wait_time = int(float(str(e).split("in ")[-1].split("s")[0])) + 5
                 except ValueError:
                     pass
-            print(f"Rate limit reached. Waiting {wait_time} seconds...")
+            print(Fore.RED + f"[ERROR] Rate limit reached. Waiting {wait_time} seconds...")
             time.sleep(wait_time)
         except Exception as e:
-            print(f"OpenAI API error: {e}")
+            print(Fore.RED + f"[ERROR] OpenAI API error: {e}")
             return "no"
 
 def send_email(email_address, email_password, email_subject, email_body, recipient):
@@ -95,13 +98,13 @@ def send_email(email_address, email_password, email_subject, email_body, recipie
             smtp.starttls()
             smtp.login(email_address, email_password)
             smtp.send_message(msg)
-        print("Email sent successfully.")
+        print(Fore.WHITE + "[INFO] Email sent successfully.")
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        print(Fore.RED + f"[ERROR] Failed to send email: {e}")
 
 def is_flip_post(title, body):
     if len(title.split()) + len(body.split()) < 4:
-        print("Skipping post: Not enough context")
+        print(Fore.CYAN + "[SKIPPED] Not enough context")
         return False
     
     prompt = f"""A user posted this in r/fpv:
@@ -118,7 +121,7 @@ def is_flip_post(title, body):
 
 def is_motor_spin_post(title, body):
     if len(title.split()) + len(body.split()) < 4:
-        print("Skipping post: Not enough context")
+        print(Fore.CYAN + "[SKIPPED] Not enough context")
         return False
     
     prompt = f"""A user posted this in r/fpv:
@@ -141,17 +144,17 @@ def scan_fpv_subreddit():
 
         title = submission.title
         body = submission.selftext
-
+        post_url = f"https://www.reddit.com{submission.permalink}"
+        
         if not post_filtering(title, body):
-            print(f"Skipping post: {title}")
+            print(Fore.BLUE + f"[IGNORED] Skipping post (irrelevant): {post_url}")
             save_scanned_post(submission.id)
             continue
 
         try:
-            post_url = f"https://www.reddit.com{submission.permalink}"
 
             if is_flip_post(title, body):
-                print(f"Flip issue found: {title}")
+                print(Fore.GREEN + f"[REPLIED] Flip issue detected: {post_url}")
                 response = (
                     "It seems like you're experiencing a drone flip on takeoff.\n\n"
                     "[Here's](https://www.youtube.com/watch?v=7sSYwzVCJdA) a video that should help troubleshoot the issue.\n\n"
@@ -160,11 +163,11 @@ def scan_fpv_subreddit():
                 )
                 submission.reply(response)
                 email_subject = "Bot Reply - Flip Dectected"
-                email_body = f"Bot replied to a Reddit post:\n\nTitle: {title}\n\nLink: {post_url}"
+                email_body = f"Title: {title}\n\nLink: {post_url}"
                 send_email(email_address, email_password, email_subject, email_body, recipient)
 
             elif is_motor_spin_post(title, body):
-                print(f"Motor spin post found: {title}")
+                print(Fore.GREEN + f"[REPLIED] Motor spin issue detected: {post_url}")
                 response = (
                     "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
                     "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
@@ -177,16 +180,18 @@ def scan_fpv_subreddit():
                 email_body = f"Bot replied to a Reddit post:\n\nTitle: {title}\n\nLink: {post_url}"
                 send_email(email_address, email_password, email_subject, email_body, recipient)
             else:
-                print (f"Scanned Post: {title}")
+                print(Fore.YELLOW + f"[SCANNED] Relevant but no match: {post_url}")
 
         except Exception as e:
-            print(f"Error replying to post or sending email: {e}")
+            print(Fore.RED + f"[ERROR] Exception during reply or email: {e}")
 
         save_scanned_post(submission.id)
         time.sleep(10)
 
 if __name__ == "__main__":
+    print(Fore.MAGENTA + "[STARTUP] Bot is launching...")
+    time.sleep(1)
+    print(Fore.MAGENTA + "[STATUS] Scanning r/fpv...")
     while True:
         scan_fpv_subreddit()
-        print("Sleeping for 1 minute...")
         time.sleep(60)
