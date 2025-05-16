@@ -8,7 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from colorama import init, Fore
 
-init(autoreset=True)
+init(autoreset=True)https://github.com/kiranze/FPVNoobBot/blob/main/FPVNoobBot.py
 
 # Email credentials
 email_address = "____"
@@ -19,7 +19,7 @@ recipient = "____"
 
 # Reddit API credentials
 reddit_client_id = "____"
-reddit_client_secret = "____-A"
+reddit_client_secret = "____"
 reddit_username = "____"
 reddit_password = "____"
 reddit_user_agent = "____"
