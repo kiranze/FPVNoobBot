@@ -8,7 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from colorama import init, Fore
 
-init(autoreset=True)https://github.com/kiranze/FPVNoobBot/blob/main/FPVNoobBot.py
+init(autoreset=True)
 
 # Email credentials
 email_address = "____"
