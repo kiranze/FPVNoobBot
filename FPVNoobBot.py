@@ -7,6 +7,7 @@ from openai import OpenAIError
 import smtplib
 from email.mime.text import MIMEText
 from colorama import init, Fore
+import threading
 
 init(autoreset=True)
 
@@ -19,7 +20,7 @@ recipient = "____"
 
 # Reddit API credentials
 reddit_client_id = "____"
-reddit_client_secret = "____"
+reddit_client_secret = "____-A"
 reddit_username = "____"
 reddit_password = "____"
 reddit_user_agent = "____"
@@ -28,7 +29,8 @@ reddit_user_agent = "____"
 openai_api_key = "____"
 
 # File path to track scanned posts
-scanned_posts_file = "____"
+scanned_posts_file = "RedditBots/FPVNoobBot/scanned_posts.txt"
+scanned_comments_file = "RedditBots/FPVNoobBot/scanned_comments.txt"
 
 # Initialise Reddit and OpenAI
 reddit = praw.Reddit(
@@ -51,6 +53,19 @@ def save_scanned_post(post_id):
     with open(scanned_posts_file, "a") as f:
         f.write(post_id + "\n")
 
+def load_scanned_comments():
+    if not os.path.exists(scanned_comments_file):
+        return set()
+    with open(scanned_comments_file, "r") as f:
+        return set(line.strip() for line in f.readlines())
+
+def save_scanned_comment(comment_id):
+    os.makedirs(os.path.dirname(scanned_comments_file), exist_ok=True)
+    with open(scanned_comments_file, "a") as f:
+        f.write(comment_id + "\n")
+        # print(Fore.YELLOW + f"[LOG] Saved comment ID: {comment_id}")
+
+        
 def post_filtering(title, body):
     text = f"{title} {body}".lower()
     keywords = [
@@ -98,13 +113,12 @@ def send_email(email_address, email_password, email_subject, email_body, recipie
             smtp.starttls()
             smtp.login(email_address, email_password)
             smtp.send_message(msg)
-        print(Fore.WHITE + "[INFO] Email sent successfully.")
     except Exception as e:
         print(Fore.RED + f"[ERROR] Failed to send email: {e}")
 
 def is_flip_post(title, body):
     if len(title.split()) + len(body.split()) < 4:
-        print(Fore.CYAN + "[SKIPPED] Not enough context")
+        print(Fore.CYAN + f"[SKIPPED] Not enough context: {post_url}")
         return False
     
     prompt = f"""A user posted this in r/fpv:
@@ -121,7 +135,7 @@ def is_flip_post(title, body):
 
 def is_motor_spin_post(title, body):
     if len(title.split()) + len(body.split()) < 4:
-        print(Fore.CYAN + "[SKIPPED] Not enough context")
+        print(Fore.CYAN + f"[SKIPPED] Not enough context: {post_url}")
         return False
     
     prompt = f"""A user posted this in r/fpv:
@@ -137,7 +151,7 @@ def is_motor_spin_post(title, body):
 def scan_fpv_subreddit():
     subreddit = reddit.subreddit("fpv")
     scanned_posts = load_scanned_posts()
-
+    max_retries = 15
     for submission in subreddit.new(limit=5):
         if submission.id in scanned_posts:
             continue
@@ -145,53 +159,129 @@ def scan_fpv_subreddit():
         title = submission.title
         body = submission.selftext
         post_url = f"https://www.reddit.com{submission.permalink}"
-        
+
         if not post_filtering(title, body):
-            print(Fore.BLUE + f"[IGNORED] Skipping post (irrelevant): {post_url}")
+            print(Fore.BLUE + f"[SKIPPED] Irrelevant: {post_url}")
             save_scanned_post(submission.id)
             continue
 
-        try:
+        retries = 0
+        while retries < max_retries:
+            try:
+                if is_flip_post(title, body):
+                    print(Fore.GREEN + f"[REPLIED] Flip issue detected: {post_url}")
+                    response = (
+                        "It seems like you're experiencing a drone flip/yaw spin on takeoff.\n\n"
+                        "[This](https://www.youtube.com/watch?v=7sSYwzVCJdA) video should help troubleshoot the issue.\n\n"
+                        "---\n"
+                        "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
+                    )
+                    submission.reply(response)
+                    email_subject = "Bot Reply - Flip Detected"
+                    email_body = f"Title: {title}\n\nLink: {post_url}"
+                    send_email(email_address, email_password, email_subject, email_body, recipient)
 
-            if is_flip_post(title, body):
-                print(Fore.GREEN + f"[REPLIED] Flip issue detected: {post_url}")
-                response = (
-                    "It seems like you're experiencing a drone flip on takeoff.\n\n"
-                    "[Here's](https://www.youtube.com/watch?v=7sSYwzVCJdA) a video that should help troubleshoot the issue.\n\n"
-                    "---\n"
-                    "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
-                )
-                submission.reply(response)
-                email_subject = "Bot Reply - Flip Dectected"
-                email_body = f"Title: {title}\n\nLink: {post_url}"
-                send_email(email_address, email_password, email_subject, email_body, recipient)
+                elif is_motor_spin_post(title, body):
+                    print(Fore.GREEN + f"[REPLIED] Motor spin issue detected: {post_url}")
+                    response = (
+                        "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
+                        "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
+                        "This shouldn't happen with props on.\n\n"
+                        "---\n"
+                        "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
+                    )
+                    submission.reply(response)
+                    email_subject = "Bot Reply - Motor Spin Issue"
+                    email_body = f"Title: {title}\n\nLink: {post_url}"
+                    send_email(email_address, email_password, email_subject, email_body, recipient)
 
-            elif is_motor_spin_post(title, body):
-                print(Fore.GREEN + f"[REPLIED] Motor spin issue detected: {post_url}")
-                response = (
-                    "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
-                    "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
-                    "This doesn’t happen in the air or with props on—it's just feedback loss.\n\n"
-                    "---\n"
-                    "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically. ^This ^feature ^is ^still ^being ^tested, ^if ^this ^reply ^seems ^wrong, ^please ^report ^it ^by ^replying ^to ^the ^bot."
-                )
-                submission.reply(response)
-                email_subject = "Bot Reply - Motor Spin Issue"
-                email_body = f"Bot replied to a Reddit post:\n\nTitle: {title}\n\nLink: {post_url}"
-                send_email(email_address, email_password, email_subject, email_body, recipient)
-            else:
-                print(Fore.YELLOW + f"[SCANNED] Relevant but no match: {post_url}")
+                else:
+                    print(Fore.YELLOW + f"[SCANNED] No clear issue matched: {post_url}")
 
-        except Exception as e:
-            print(Fore.RED + f"[ERROR] Exception during reply or email: {e}")
+                break  # Success, so exit retry loop
+
+            except prawcore.exceptions.ServerError as e:
+                retries += 1
+                print(Fore.RED + f"[ERROR] Internal Server Error: {e} (Retrying, attempt: {retries}/{max_retries})")
+                time.sleep(RETRY_DELAY)
+
+            except Exception as e:
+                print(Fore.RED + f"[ERROR] Exception during reply or email: {e}")
+                break  # Don't retry on unknown errors
 
         save_scanned_post(submission.id)
         time.sleep(10)
+        
+def scan_fpv_comments():
+    subreddit = reddit.subreddit("fpv")
+    scanned_comments = load_scanned_comments()
+
+    for comment in subreddit.stream.comments(skip_existing=True):
+        if comment.id in scanned_comments:
+            continue
+        if comment.author and comment.author.name == reddit.user.me().name:
+            continue
+        body = comment.body.lower()
+        submission = comment.submission
+        post_url = f"https://www.reddit.com{submission.permalink}"
+
+        if "!flippost" in body:
+            print(Fore.CYAN + f"[SUMMONED] !flippost in comment: {post_url}")
+            try:
+                submission.reply(
+                    "It seems like you're experiencing a drone flip/yaw spin on takeoff.\n\n"
+                    "[This](https://www.youtube.com/watch?v=7sSYwzVCJdA) video should help troubleshoot the issue.\n\n"
+                    "---\n"
+                    "^I ^am ^a ^bot, ^this ^response ^was ^triggered ^by ^!flippost ^in ^the ^comments."
+                )
+                send_email(
+                    email_address,
+                    email_password,
+                    "Bot Summoned - FlipPost",
+                    f"!flippost used in comment.\n\nPost title: {submission.title}\n\nLink: {post_url}",
+                    recipient
+                )
+            except Exception as e:
+                print(Fore.RED + f"[ERROR] Error replying to summoned flippost: {e}")
+            finally:
+                save_scanned_comment(comment.id)
+
+        elif "!motorspin" in body:
+            print(Fore.CYAN + f"[SUMMONED] !motorspin in comment: {post_url}")
+            try:
+                submission.reply(
+                    "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
+                    "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
+                    "This shouldn't happen with props on.\n\n"
+                    "---\n"
+                    "^I ^am ^a ^bot, ^this ^response ^was ^triggered ^by ^!motorspin ^in ^the ^comments."
+                )
+                send_email(
+                    email_address,
+                    email_password,
+                    "Bot Summoned - MotorSpin",
+                    f"!motorspin used in comment.\n\nPost title: {submission.title}\n\nLink: {post_url}",
+                    recipient
+                )
+            except Exception as e:
+                print(Fore.RED + f"[ERROR] Error replying to summoned motorspin: {e}")
+            finally:
+                save_scanned_comment(comment.id)
 
 if __name__ == "__main__":
-    print(Fore.MAGENTA + "[STARTUP] Bot is launching...")
+    print(Fore.MAGENTA + "[STATUS] Bot is launching...")
     time.sleep(1)
     print(Fore.MAGENTA + "[STATUS] Scanning r/fpv...")
-    while True:
-        scan_fpv_subreddit()
-        time.sleep(60)
+    def run_post_scanner():
+        while True:
+            scan_fpv_subreddit()
+            time.sleep(60)
+
+    def run_comment_scanner():
+        scan_fpv_comments()
+
+    post_thread = threading.Thread(target=run_post_scanner)
+    comment_thread = threading.Thread(target=run_comment_scanner)
+
+    post_thread.start()
+    comment_thread.start()
