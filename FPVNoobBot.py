@@ -8,6 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from colorama import init, Fore
 import threading
+import prawcore
 
 init(autoreset=True)
 
@@ -20,10 +21,10 @@ recipient = "____"
 
 # Reddit API credentials
 reddit_client_id = "____"
-reddit_client_secret = "____-A"
-reddit_username = "____"
+reddit_client_secret = "____"
+reddit_username = "FPVNoobBot"
 reddit_password = "____"
-reddit_user_agent = "____"
+reddit_user_agent = "python:fpvnoobbot:v2.8 (by u/Gudge2007)"
 
 # OpenAI API key
 openai_api_key = "____"
@@ -42,30 +43,34 @@ reddit = praw.Reddit(
 )
 openai.api_key = openai_api_key
 
+# Load the set of already scanned post IDs from file. If empty returns nothing
 def load_scanned_posts():
     if not os.path.exists(scanned_posts_file):
         return set()
     with open(scanned_posts_file, "r") as f:
         return set(line.strip() for line in f.readlines())
 
+# Save a post ID to the file
 def save_scanned_post(post_id):
     os.makedirs(os.path.dirname(scanned_posts_file), exist_ok=True)
     with open(scanned_posts_file, "a") as f:
         f.write(post_id + "\n")
-
+        
+# Load the set of already scanned comment IDs from file. If empty returns nothing
 def load_scanned_comments():
     if not os.path.exists(scanned_comments_file):
         return set()
     with open(scanned_comments_file, "r") as f:
         return set(line.strip() for line in f.readlines())
-
+        
+# Save a comment ID to the file
 def save_scanned_comment(comment_id):
     os.makedirs(os.path.dirname(scanned_comments_file), exist_ok=True)
     with open(scanned_comments_file, "a") as f:
         f.write(comment_id + "\n")
         # print(Fore.YELLOW + f"[LOG] Saved comment ID: {comment_id}")
 
-        
+# Filter obviously irrelevant posts, to reduce openai costs
 def post_filtering(title, body):
     text = f"{title} {body}".lower()
     keywords = [
@@ -73,10 +78,13 @@ def post_filtering(title, body):
         "prop", "props", "propeller", "ramps up", "motor idle", "motor output", "motor increase",
         "flip", "flips", "flipping", "flipped", "flip out", "flips out", "roll", "yaw spin", 
         "jump", "tumbles", "unstable on takeoff", "disarms on takeoff", "crash", "flips on arming",
-        "disarm", "uncontrollable", "flip takeoff", "won't takeoff"
-    ]
+        "disarm", "uncontrollable", "flip takeoff", "won't takeoff", "getting started", "beginner", 
+        "newbie", "starter", "starting", "learning", "advice", "basics", "recommendation", 
+        "setup", "help", "new", "fpv", "start", "soldering", "solder", "joints", "joint", "rate", "how"]
+
     return any(keyword in text for keyword in keywords)
 
+# Initialise OpenAI, set parameters, error management
 def ask_openai(prompt):
     while True:
         try:
@@ -100,7 +108,8 @@ def ask_openai(prompt):
         except Exception as e:
             print(Fore.RED + f"[ERROR] OpenAI API error: {e}")
             return "no"
-
+            
+# Send email
 def send_email(email_address, email_password, email_subject, email_body, recipient):
     msg = MIMEText(email_body)
     msg['Subject'] = email_subject
@@ -116,28 +125,47 @@ def send_email(email_address, email_password, email_subject, email_body, recipie
     except Exception as e:
         print(Fore.RED + f"[ERROR] Failed to send email: {e}")
 
-def is_flip_post(title, body):
-    if len(title.split()) + len(body.split()) < 4:
-        print(Fore.CYAN + f"[SKIPPED] Not enough context: {post_url}")
-        return False
-    
+# Prompt for flip posts
+def flip_post(title, body, submission):
     prompt = f"""A user posted this in r/fpv:
     Title: "{title}"
     Body: "{body}"
+    Is this post asking how to fix a drone (also called quad, kwad, quadcopter, tinywhoop, cinewhoop, whoop) that is experiencing a flip-out on takeoff?  
+    Only answer "Yes" if ALL of the following are true:
+    - The drone is flipping, spinning, jumping, or disarming right after arming or throttle-up.
+    - The user is seeking help or trying to fix the problem.
+    - It happens at or immediately after takeoff (not mid-flight or after flying normally).
+    - It is unintentional (not a trick, flip mode, or freestyle).
 
-    Does this post describe a drone (also called quad, kwad, quadcopter, tinywhoop, cinewhoop, whoop) experiencing a flip-out on takeoff?  
-    This includes issues where the drone disarms, flips, jumps, or spins out after arming when throttle is raised.  
-    **Answer "No" to posts about intentional flips, freestyle tricks, or pilots describing how many flips they can do.**  
-    **Answer "No" to posts that mention or imply the drone flying normally before crashing/flipping out**
-    Only answer "Yes" if you are 100% certain that the post is describing a drone flipping, disarming, or spinning out on takeoff or throttle up — not while flying. If you're even slightly unsure, answer "No".
-    Always answer with only "Yes" or "No", no extra text."""
+    Answer "No" if:
+    - The drone flies normally first before flipping or crashing.
+    - The flip/spin is part of a trick or a stunt.
+    - The post is vague or you're unsure.
+    - The user is not asking for help.
+
+    Only reply with "Yes" or "No" – no explanation or extra text."""
     return ask_openai(prompt) == "yes"
 
-def is_motor_spin_post(title, body):
-    if len(title.split()) + len(body.split()) < 4:
-        print(Fore.CYAN + f"[SKIPPED] Not enough context: {post_url}")
-        return False
+# Prompt for soldering help posts
+def soldering_help(title, body, submission):
+    prompt = f"""A user posted this in r/fpv:
+    Title: "{title}"
+    Body: "{body}"
+    Is this user asking for help with soldering?
+    Answer "Yes" if the following are true:
+    - The user is specifically asking for help with soldering. (e.g. technique, troubleshooting, fixing bad joints).
+    - The user is asking others to rate their soldering or similar. (e.g. "how does this look?", "is this joint ok?", "rate my soldering").
     
+    Answer "No" if:
+    - The user is only asking for buying advice (e.g. which soldering iron or solder to get).
+    - The post is about tools, gear, or other unrelated issues.
+    - You are unsure.
+
+    Only answer "Yes" or "No"."""
+    return ask_openai(prompt) == "yes"
+
+# Prompt for motor spin posts
+def motor_spin_post(title, body, submission):
     prompt = f"""A user posted this in r/fpv:
     Title: "{title}"
     Body: "{body}"
@@ -148,11 +176,12 @@ def is_motor_spin_post(title, body):
     Answer only "Yes" or "No"."""
     return ask_openai(prompt) == "yes"
 
+# Scan the past 20 (unless already scanned) in r/fpv, reply if gpt prompt returns as a "yes".
 def scan_fpv_subreddit():
     subreddit = reddit.subreddit("fpv")
     scanned_posts = load_scanned_posts()
     max_retries = 15
-    for submission in subreddit.new(limit=5):
+    for submission in subreddit.new(limit=20):
         if submission.id in scanned_posts:
             continue
 
@@ -168,7 +197,7 @@ def scan_fpv_subreddit():
         retries = 0
         while retries < max_retries:
             try:
-                if is_flip_post(title, body):
+                if flip_post(title, body, submission):
                     print(Fore.GREEN + f"[REPLIED] Flip issue detected: {post_url}")
                     response = (
                         "It seems like you're experiencing a drone flip/yaw spin on takeoff.\n\n"
@@ -177,11 +206,12 @@ def scan_fpv_subreddit():
                         "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
                     )
                     submission.reply(response)
+                    submission.report("Suspected FAQ (bot flagged)")
                     email_subject = "Bot Reply - Flip Detected"
                     email_body = f"Title: {title}\n\nLink: {post_url}"
                     send_email(email_address, email_password, email_subject, email_body, recipient)
 
-                elif is_motor_spin_post(title, body):
+                elif motor_spin_post(title, body, submission):
                     print(Fore.GREEN + f"[REPLIED] Motor spin issue detected: {post_url}")
                     response = (
                         "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
@@ -191,10 +221,25 @@ def scan_fpv_subreddit():
                         "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
                     )
                     submission.reply(response)
+                    submission.report("Suspected FAQ (bot flagged)")
                     email_subject = "Bot Reply - Motor Spin Issue"
                     email_body = f"Title: {title}\n\nLink: {post_url}"
                     send_email(email_address, email_password, email_subject, email_body, recipient)
-
+                    
+                elif soldering_help(title, body, submission):
+                    print(Fore.GREEN + f"[REPLIED] Soldering help post detected: {post_url}")
+                    response = (
+                        "It seems like you're asking for soldering help or for feedback on your soldering (or just mentioned the word *soldering* — i'm not the smartest XD).\n\n"
+                        "[This video by Joshua Bardwell](https://www.youtube.com/watch?v=GoPT69y98pY) is an excellent guide on how to solder properly for FPV builds and includes tips for tinning, cleaning pads, and avoiding cold joints.\n\n"
+                        "[This written guide by Oscar Liang](https://oscarliang.com/soldering-guide/) also goes through gear, technique, and common issues in a beginner-friendly way.\n\n"
+                        "---\n"
+                        "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
+                    )
+                    submission.reply(response)
+                    # submission.report("Suspected FAQ (bot flagged)")
+                    email_subject = "Bot Reply - Soldering Help Post"
+                    email_body = f"Title: {title}\n\nLink: {post_url}"
+                    send_email(email_address, email_password, email_subject, email_body, recipient)
                 else:
                     print(Fore.YELLOW + f"[SCANNED] No clear issue matched: {post_url}")
 
@@ -203,15 +248,16 @@ def scan_fpv_subreddit():
             except prawcore.exceptions.ServerError as e:
                 retries += 1
                 print(Fore.RED + f"[ERROR] Internal Server Error: {e} (Retrying, attempt: {retries}/{max_retries})")
-                time.sleep(RETRY_DELAY)
+                time.sleep(10)
 
             except Exception as e:
                 print(Fore.RED + f"[ERROR] Exception during reply or email: {e}")
                 break  # Don't retry on unknown errors
 
         save_scanned_post(submission.id)
-        time.sleep(10)
-        
+        time.sleep(20)
+
+# Scan comments for summons such as !flippost and replies such as "good bot" and "bad bot".
 def scan_fpv_comments():
     subreddit = reddit.subreddit("fpv")
     scanned_comments = load_scanned_comments()
@@ -245,7 +291,27 @@ def scan_fpv_comments():
                 print(Fore.RED + f"[ERROR] Error replying to summoned flippost: {e}")
             finally:
                 save_scanned_comment(comment.id)
-
+        elif "!soldering" in body:
+            print(Fore.CYAN + f"[SUMMONED] !soldering in comment: {post_url}")
+            try:
+                submission.reply(
+                    "It seems like you're asking for soldering help or for feedback on your soldering.\n\n"
+                    "[This video by Joshua Bardwell](https://www.youtube.com/watch?v=GoPT69y98pY) is an excellent guide on how to solder properly for FPV builds and includes tips for tinning, cleaning pads, and avoiding cold joints.\n\n"
+                    "[This written guide by Oscar Liang](https://oscarliang.com/soldering-guide/) also goes through gear, technique, and common issues in a beginner-friendly way.\n\n"
+                    "---\n"
+                    "^I ^am ^a ^bot, ^this ^response ^was ^triggered ^by ^!soldering ^in ^the ^comments."
+                )
+                send_email(
+                    email_address,
+                    email_password,
+                    "Bot Summoned - Soldering",
+                    f"!soldering used in comment.\n\nPost title: {submission.title}\n\nLink: {post_url}",
+                    recipient
+                )
+            except Exception as e:
+                print(Fore.RED + f"[ERROR] Error replying to summoned soldering: {e}")
+            finally:
+                save_scanned_comment(comment.id)
         elif "!motorspin" in body:
             print(Fore.CYAN + f"[SUMMONED] !motorspin in comment: {post_url}")
             try:
@@ -267,19 +333,47 @@ def scan_fpv_comments():
                 print(Fore.RED + f"[ERROR] Error replying to summoned motorspin: {e}")
             finally:
                 save_scanned_comment(comment.id)
-
+        if comment.parent_id.startswith("t1_"):  
+            try:
+                parent_comment = reddit.comment(id=comment.parent_id[3:])
+                if parent_comment.author and parent_comment.author.name == reddit.user.me().name:
+                    if comment.body.strip().lower() in ["good bot", "good bot.", "good bot!"]:
+                        print(Fore.GREEN + f"[REPLIED] Good bot detected: https://www.reddit.com{comment.permalink}")
+                        comment.reply("Good human.")
+                        save_scanned_comment(comment.id)
+                        continue
+                        
+                    # Delete comment if user replies with "bad bot"
+                    elif comment.body.strip().lower() in ["bad bot", "bad bot."]:
+                        print(Fore.RED + f"[DELETED] Bad bot detected: https://www.reddit.com{parent_comment.permalink}")
+                        comment.reply("Sorry for the mistake, deleting comment.")
+                        parent_comment.delete()
+                        save_scanned_comment(comment.id)
+            except Exception as e:
+                print(Fore.RED + f"[ERROR] Checking replies: {e}")
+                
+# Main loop
 if __name__ == "__main__":
-    print(Fore.MAGENTA + "[STATUS] Bot is launching...")
+    print(Fore.MAGENTA + "[STATUS] Bot is starting...")
     time.sleep(1)
     print(Fore.MAGENTA + "[STATUS] Scanning r/fpv...")
     def run_post_scanner():
         while True:
-            scan_fpv_subreddit()
-            time.sleep(60)
+            try:
+                scan_fpv_subreddit()
+            except Exception as e:
+                # print(Fore.RED + f"[ERROR] Post scanner crash: {e}")
+                time.sleep(5)  
+
 
     def run_comment_scanner():
-        scan_fpv_comments()
-
+        while True:
+            try:
+                scan_fpv_comments()
+                time.sleep(20)
+            except Exception as e:
+                # print(Fore.RED + f"[ERROR] Comment scanner crash: {e}")
+                time.sleep(5)
     post_thread = threading.Thread(target=run_post_scanner)
     comment_thread = threading.Thread(target=run_comment_scanner)
 
