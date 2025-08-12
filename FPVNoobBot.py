@@ -80,7 +80,7 @@ def post_filtering(title, body):
         "jump", "tumbles", "unstable on takeoff", "disarms on takeoff", "crash", "flips on arming",
         "disarm", "uncontrollable", "flip takeoff", "won't takeoff", "getting started", "beginner", 
         "newbie", "starter", "starting", "learning", "advice", "basics", "recommendation", 
-        "setup", "help", "new", "fpv", "start", "soldering", "solder", "joints", "joint", "rate", "how"]
+        "setup", "help", "new", "fpv", "start", "soldering", "solder", "joints", "joint", "rate", "how", "lost"]
 
     return any(keyword in text for keyword in keywords)
 
