@@ -22,16 +22,16 @@ recipient = "____"
 # Reddit API credentials
 reddit_client_id = "____"
 reddit_client_secret = "____"
-reddit_username = "FPVNoobBot"
+reddit_username = "___"
 reddit_password = "____"
-reddit_user_agent = "python:fpvnoobbot:v2.8 (by u/Gudge2007)"
+reddit_user_agent = "___"
 
 # OpenAI API key
 openai_api_key = "____"
 
 # File path to track scanned posts
-scanned_posts_file = "RedditBots/FPVNoobBot/scanned_posts.txt"
-scanned_comments_file = "RedditBots/FPVNoobBot/scanned_comments.txt"
+scanned_posts_file = "___"
+scanned_comments_file = "___"
 
 # Initialise Reddit and OpenAI
 reddit = praw.Reddit(
@@ -74,13 +74,14 @@ def save_scanned_comment(comment_id):
 def post_filtering(title, body):
     text = f"{title} {body}".lower()
     keywords = [
-        "motor", "motors", "spin", "spinning", "throttle", "arming", "arm", "props off", "bench test",
+        "motor", "motors", "spin", "spinning", "throttle", "arming", "arm",
         "prop", "props", "propeller", "ramps up", "motor idle", "motor output", "motor increase",
         "flip", "flips", "flipping", "flipped", "flip out", "flips out", "roll", "yaw spin", 
         "jump", "tumbles", "unstable on takeoff", "disarms on takeoff", "crash", "flips on arming",
         "disarm", "uncontrollable", "flip takeoff", "won't takeoff", "getting started", "beginner", 
         "newbie", "starter", "starting", "learning", "advice", "basics", "recommendation", 
-        "setup", "help", "new", "fpv", "start", "soldering", "solder", "joints", "joint", "rate", "how", "lost"]
+        "setup", "help", "new", "fpv", "start", "soldering", "solder", "joints", "joint", "rate", "how",
+        "aliexpress", "ali", "coupons", "code", "discount"]
 
     return any(keyword in text for keyword in keywords)
 
@@ -107,7 +108,7 @@ def ask_openai(prompt):
             time.sleep(wait_time)
         except Exception as e:
             print(Fore.RED + f"[ERROR] OpenAI API error: {e}")
-            return "no"
+            break
             
 # Send email
 def send_email(email_address, email_password, email_subject, email_body, recipient):
@@ -143,38 +144,53 @@ def flip_post(title, body, submission):
     - The post is vague or you're unsure.
     - The user is not asking for help.
 
-    Only reply with "Yes" or "No" – no explanation or extra text."""
+    Reply only with "Yes" or "No".
+    """
     return ask_openai(prompt) == "yes"
 
-# Prompt for soldering help posts
 def soldering_help(title, body, submission):
-    prompt = f"""A user posted this in r/fpv:
+    prompt = f"""
+    You are checking if someone is asking for help with soldering in this Reddit post.
+
     Title: "{title}"
     Body: "{body}"
-    Is this user asking for help with soldering?
-    Answer "Yes" if the following are true:
-    - The user is specifically asking for help with soldering. (e.g. technique, troubleshooting, fixing bad joints).
-    - The user is asking others to rate their soldering or similar. (e.g. "how does this look?", "is this joint ok?", "rate my soldering").
+
+    Reply "Yes" only if:
+    - The user is clearly asking how to solder something.
+    - Or they want feedback on their soldering work.
+    - Example: "why won't this wire stick?", "rate my soldering", "is this a cold joint?"
+
+    Reply "No" if:
+    - They just mention soldering.
+    - They are only talking about tools or gear.
+    - They arent asking for help specifically with soldering.
+    - Or you're not sure.
+
+    Answer only "Yes" or "No".
+    """
+    return ask_openai(prompt) == "yes"
     
-    Answer "No" if:
-    - The user is only asking for buying advice (e.g. which soldering iron or solder to get).
-    - The post is about tools, gear, or other unrelated issues.
-    - You are unsure.
-
-    Only answer "Yes" or "No"."""
-    return ask_openai(prompt) == "yes"
-
-# Prompt for motor spin posts
-def motor_spin_post(title, body, submission):
-    prompt = f"""A user posted this in r/fpv:
+def aliexpress_promo(title, body, submission):
+    prompt = f"""
+    A user ported this in r/fpv:
     Title: "{title}"
     Body: "{body}"
+    
+    Is this user promoting aliexpress (also shortened to Ali) discount codes/coupon codes?
+    
+    Reply "Yes" only if:
+    - The user is offering Aliexpress (or Ali) discount codes (even if they say they randomly found the codes (which is not true)).
+    - They mention Ali (Aliexpress) and coupon codes/discounts in the post.
 
-    Is this post asking why motors start to spin up or increase throttle *only* when props are off, for example, when testing on the bench or after arming without props?
-    This is a common issue caused by the PID controller not getting feedback from the props, causing it to increase motor output thinking the drone isn't moving.
-    Only answer "Yes" if the post is *clearly* about motors speeding up uncontrollably when there are NO props on. Answer "No" if props are on, if it's about idle throttle spin, or if you are not 100% sure.
-    Answer only "Yes" or "No"."""
+    Reply "No" if:
+    - You are not sure.
+    
+    The user may not directly offer the codes, they often suggest that they randomly discovered them which is not true (reply "Yes" to these posts)
+    
+    Only answer "Yes" or "No"
+    """
     return ask_openai(prompt) == "yes"
+    
 
 # Scan the past 20 (unless already scanned) in r/fpv, reply if gpt prompt returns as a "yes".
 def scan_fpv_subreddit():
@@ -210,22 +226,15 @@ def scan_fpv_subreddit():
                     email_subject = "Bot Reply - Flip Detected"
                     email_body = f"Title: {title}\n\nLink: {post_url}"
                     send_email(email_address, email_password, email_subject, email_body, recipient)
-
-                elif motor_spin_post(title, body, submission):
-                    print(Fore.GREEN + f"[REPLIED] Motor spin issue detected: {post_url}")
-                    response = (
-                        "It seems like your quad's motors are throttling up on their own when arming without props. This is totally normal.\n\n"
-                        "The flight controller expects the drone to react to motor output. Without props, there’s no movement, so the flight controller keeps increasing throttle trying to 'correct' what it thinks is an error.\n\n"
-                        "This shouldn't happen with props on.\n\n"
-                        "---\n"
-                        "^I ^am ^a ^bot, ^this ^action ^was ^done ^automatically."
-                    )
-                    submission.reply(response)
-                    submission.report("Suspected FAQ (bot flagged)")
-                    email_subject = "Bot Reply - Motor Spin Issue"
+                    
+                elif aliexpress_promo(title, body, submission):
+                    print(Fore.GREEN + f"[REMOVED] Possible Aliexpress promo: {post_url}")
+                    # submission.report("Suspected Aliexpress Spam (bot flagged)")
+                    submission.mod.remove(spam=True, mod_note="Auto-removed suspected Aliexpress spam.")
+                    email_subject = "Bot Reply - Aliexpress Spam"
                     email_body = f"Title: {title}\n\nLink: {post_url}"
                     send_email(email_address, email_password, email_subject, email_body, recipient)
-                    
+           
                 elif soldering_help(title, body, submission):
                     print(Fore.GREEN + f"[REPLIED] Soldering help post detected: {post_url}")
                     response = (
