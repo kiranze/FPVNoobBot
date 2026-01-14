@@ -75,13 +75,10 @@ def post_filtering(title, body):
     text = f"{title} {body}".lower()
     keywords = [
         "motor", "motors", "spin", "spinning", "throttle", "arming", "arm",
-        "prop", "props", "propeller", "ramps up", "motor idle", "motor output", "motor increase",
-        "flip", "flips", "flipping", "flipped", "flip out", "flips out", "roll", "yaw spin", 
+        "prop", "props", "propeller","flip", "flips", "flipping", "flipped", "flip out", "flips out", "roll", "yaw spin", 
         "jump", "tumbles", "unstable on takeoff", "disarms on takeoff", "crash", "flips on arming",
         "disarm", "uncontrollable", "flip takeoff", "won't takeoff", "getting started", "beginner", 
-        "newbie", "starter", "starting", "learning", "advice", "basics", "recommendation", 
-        "setup", "help", "new", "fpv", "start", "soldering", "solder", "joints", "joint", "rate", "how",
-        "aliexpress", "ali", "coupons", "code", "discount"]
+        "newbie", "advice", "setup", "help", "fpv", "aliexpress", "ali", "coupons", "code", "discount"]
 
     return any(keyword in text for keyword in keywords)
 
