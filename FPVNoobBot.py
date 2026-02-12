@@ -267,7 +267,6 @@ def scan_fpv_subreddit():
 def scan_fpv_comments():
     subreddit = reddit.subreddit("fpv")
     scanned_comments = load_scanned_comments()
-
     for comment in subreddit.stream.comments(skip_existing=True):
         if comment.id in scanned_comments:
             continue
@@ -276,7 +275,7 @@ def scan_fpv_comments():
         body = comment.body.lower()
         submission = comment.submission
         post_url = f"https://www.reddit.com{submission.permalink}"
-
+        
         if "!flippost" in body:
             print(Fore.CYAN + f"[SUMMONED] !flippost in comment: {post_url}")
             try:
@@ -297,6 +296,7 @@ def scan_fpv_comments():
                 print(Fore.RED + f"[ERROR] Error replying to summoned flippost: {e}")
             finally:
                 save_scanned_comment(comment.id)
+                
         elif "!soldering" in body:
             print(Fore.CYAN + f"[SUMMONED] !soldering in comment: {post_url}")
             try:
@@ -318,6 +318,7 @@ def scan_fpv_comments():
                 print(Fore.RED + f"[ERROR] Error replying to summoned soldering: {e}")
             finally:
                 save_scanned_comment(comment.id)
+                
         elif "!motorspin" in body:
             print(Fore.CYAN + f"[SUMMONED] !motorspin in comment: {post_url}")
             try:
@@ -335,6 +336,7 @@ def scan_fpv_comments():
                     f"!motorspin used in comment.\n\nPost title: {submission.title}\n\nLink: {post_url}",
                     recipient
                 )
+                
             except Exception as e:
                 print(Fore.RED + f"[ERROR] Error replying to summoned motorspin: {e}")
             finally:
@@ -343,20 +345,30 @@ def scan_fpv_comments():
             try:
                 parent_comment = reddit.comment(id=comment.parent_id[3:])
                 if parent_comment.author and parent_comment.author.name == reddit.user.me().name:
-                    if comment.body.strip().lower() in ["good bot", "good bot.", "good bot!"]:
-                        print(Fore.GREEN + f"[REPLIED] Good bot detected: https://www.reddit.com{comment.permalink}")
-                        comment.reply("Good human.")
+                
+                    if "good bot" in body:
+                        if comment.author and comment.author.name.lower() != "_________": # Nice user replies "Good bot" whenever the bot responds
+                            print(Fore.GREEN + f"[REPLIED] Good bot detected: https://www.reddit.com{comment.permalink}")
+                            comment.reply("Good human.")
+                        else:
+                            print(Fore.YELLOW + f"[Fav Human]: {comment.author.name}")
+                            comment.reply("My favorite human <3")
+                            
                         save_scanned_comment(comment.id)
                         continue
                         
-                    # Delete comment if user replies with "bad bot"
-                    elif comment.body.strip().lower() in ["bad bot", "bad bot."]:
-                        print(Fore.RED + f"[DELETED] Bad bot detected: https://www.reddit.com{parent_comment.permalink}")
-                        comment.reply("Sorry for the mistake, deleting comment.")
-                        parent_comment.delete()
-                        save_scanned_comment(comment.id)
+                    elif "bad bot" in body:
+                        if comment.author and comment.author.name.lower() != "______":  # Troublesome username
+                            print(Fore.RED + f"[DELETED] Bad bot detected: https://www.reddit.com{parent_comment.permalink}")
+                            parent_comment.delete()
+                            comment.reply("Sorry for the mistake, I've deleted my comment.")
+                        else:
+                            print(Fore.YELLOW + f"[IGNORED] 'Bad bot' from ignored user: {comment.author.name}")
+                            comment.reply("Bad human, you misused this function too many times, i'm ignoring you now :p")
+                save_scanned_comment(comment.id)
             except Exception as e:
                 print(Fore.RED + f"[ERROR] Checking replies: {e}")
+                
                 
 # Main loop
 if __name__ == "__main__":
